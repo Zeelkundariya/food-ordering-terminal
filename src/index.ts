@@ -1,12 +1,12 @@
-import { confirm, input, select } from "@inquirer/prompts";
+import { input, select, confirm } from "@inquirer/prompts";
+
 import {
-  calculateAdditionalDiscount,
   calculateDiscount,
   calculateFinalAmount,
-  calculateMembershipDiscount,
   calculateTax,
   generateBill,
 } from "./billing.js";
+
 import {
   addToCart,
   calculateItemTotal,
@@ -14,654 +14,702 @@ import {
   removeFromCart,
   updateQuantity,
 } from "./cart.js";
+
 import { createGuest, createMember, sampleCustomers } from "./customer.js";
+
 import { foodItems, searchFood } from "./data.js";
+
 import { ORDER_STATUSES, updateOrderStatus } from "./order.js";
+
 import { processPayment } from "./payment.js";
+
 import {
   Address,
-  Bill,
-  CardPayment,
   CartItem,
-  CashPayment,
   CustomerType,
   FoodItem,
   MembershipLevel,
   OrderStatus,
   Payment,
-  UpiPayment,
-  assertNever,
 } from "./types.js";
 
-export function displayHeader(): void {
-  console.log("\n╔══════════════════════════════════════╗");
-  console.log("║       🍔 FOOD ORDERING SYSTEM        ║");
-  console.log("╚══════════════════════════════════════╝\n");
+
+// ---------------- HEADER ----------------
+
+function showHeader() {
+  console.log("\n=================================");
+  console.log("       🍔 FOOD ORDERING APP");
+  console.log("=================================\n");
 }
 
-export function displayMenu(items: FoodItem[]): void {
-  console.log("\n================ FOOD MENU ================");
-  console.log("ID  Name                  Category   Price   Status");
-  console.log("--------------------------------------------------");
+
+// ---------------- FOOD MENU ----------------
+
+function showMenu(items: FoodItem[]) {
+  console.log("\n------------- FOOD MENU -------------");
+
   items.forEach((item) => {
-    const idStr = `#${item.id}`.padEnd(4, " ");
-    const nameStr = item.name.padEnd(22, " ");
-    const catStr = item.category.padEnd(11, " ");
-    const priceStr = `₹${item.price}`.padEnd(8, " ");
-    const statusStr = item.isAvailable ? "Available" : "Sold Out";
-    console.log(`${idStr}${nameStr}${catStr}${priceStr}${statusStr}`);
+    console.log(
+      `${item.id}. ${item.name} - ₹${item.price} ${
+        item.isAvailable ? "Available" : "Sold Out"
+      }`
+    );
   });
-  console.log("--------------------------------------------------\n");
+
+  console.log("-------------------------------------\n");
 }
 
-export function displayCart(
-  cart: CartItem[],
-  customer: CustomerType | null,
-): void {
+
+// ---------------- CART ----------------
+
+function showCart(cart: CartItem[], customer: CustomerType | null) {
   if (cart.length === 0) {
-    console.log("\n🛒 Your cart is empty.\n");
+    console.log("\n🛒 Cart is empty.\n");
     return;
   }
 
-  console.log("\n================ CURRENT CART ================");
+  console.log("\n------------- CART -------------");
+
   cart.forEach((item) => {
-    const total = calculateItemTotal(item);
-    const nameStr = item.name.padEnd(22, " ");
-    const qtyStr = `x${item.quantity}`.padEnd(8, " ");
-    console.log(`[#${item.id}] ${nameStr} ${qtyStr} ₹${total}`);
-    if (item.specialInstruction) {
-      console.log(`     Note: ${item.specialInstruction}`);
-    }
+    console.log(
+      `${item.name} x${item.quantity} = ₹${calculateItemTotal(item)}`
+    );
   });
-  console.log("----------------------------------------------");
 
   const subtotal = calculateSubtotal(cart);
-  console.log(`Subtotal:                        ₹${subtotal}`);
+
+  console.log("--------------------------------");
+  console.log(`Subtotal: ₹${subtotal}`);
 
   if (customer) {
-    const memDisc = calculateMembershipDiscount(subtotal, customer);
-    const addDisc = calculateAdditionalDiscount(subtotal);
-    const totalDisc = calculateDiscount(subtotal, customer);
-    const taxable = subtotal - totalDisc;
-    const tax = calculateTax(taxable);
-    const finalAmount = calculateFinalAmount(subtotal, totalDisc);
+    const discount = calculateDiscount(subtotal, customer);
+    const tax = calculateTax(subtotal - discount);
+    const total = calculateFinalAmount(subtotal, discount);
 
-    const levelName =
-      customer.type === "member"
-        ? `${customer.membershipLevel.toUpperCase()} Member (${customer.discountPercentage}%)`
-        : "Guest (0%)";
-
-    console.log(
-      `Customer:                        ${customer.name} [${levelName}]`,
-    );
-    console.log(`Membership Discount:             -₹${memDisc.toFixed(2)}`);
-    console.log(`Subtotal > ₹2000 Discount (5%):  -₹${addDisc.toFixed(2)}`);
-    console.log(`GST (5%):                        +₹${tax.toFixed(2)}`);
-    console.log("----------------------------------------------");
-    console.log(`Estimated Final:                 ₹${finalAmount.toFixed(2)}`);
-  } else {
-    console.log("Customer:                        (None selected)");
+    console.log(`Discount: ₹${discount.toFixed(2)}`);
+    console.log(`GST: ₹${tax.toFixed(2)}`);
+    console.log(`Final Amount: ₹${total.toFixed(2)}`);
   }
-  console.log("==============================================\n");
+
+  console.log("--------------------------------\n");
 }
 
-export function displayBill(bill: Bill, status: OrderStatus): void {
-  const { customer, cartItems, subtotal, tax, finalAmount, payment } = bill;
-  const membershipName =
-    customer.type === "member"
-      ? customer.membershipLevel.charAt(0).toUpperCase() +
-        customer.membershipLevel.slice(1)
-      : "Guest";
 
-  const membershipDiscount = calculateMembershipDiscount(subtotal, customer);
-  const additionalDiscount = calculateAdditionalDiscount(subtotal);
+// ---------------- CUSTOMER ----------------
 
-  console.log("\n========================================");
-  console.log("             ORDER SUMMARY              ");
-  console.log("========================================\n");
-  console.log(`Order ID: #${bill.orderId}\n`);
-  console.log(`Customer: ${customer.name}`);
-  console.log(`Membership: ${membershipName}\n`);
-
-  console.log("Items:");
-  console.log("----------------------------------------");
-  cartItems.forEach((item) => {
-    const itemTotal = calculateItemTotal(item);
-    const nameCol = item.name.padEnd(23, " ");
-    const qtyCol = `x${item.quantity}`.padEnd(9, " ");
-    console.log(`${nameCol}${qtyCol}₹${itemTotal}`);
-    if (item.specialInstruction) {
-      console.log(`  Note: ${item.specialInstruction}`);
-    }
-  });
-  console.log("----------------------------------------\n");
-
-  console.log(`Subtotal:                       ₹${subtotal}`);
-  console.log(
-    `Membership Discount:             ₹${membershipDiscount.toFixed(2)}`,
-  );
-  console.log(
-    `Additional Discount:              ₹${additionalDiscount.toFixed(2)}`,
-  );
-  console.log(`GST (5%):                         ₹${tax.toFixed(2)}`);
-  console.log("----------------------------------------");
-  console.log(`Final Amount:                   ₹${finalAmount.toFixed(2)}\n`);
-
-  switch (payment.method) {
-    case "cash": {
-      console.log("Payment Method: Cash");
-      console.log(`Received Amount: ₹${payment.receivedAmount}`);
-      const change = payment.receivedAmount - finalAmount;
-      if (change > 0) {
-        console.log(`Change Returned: ₹${change.toFixed(2)}`);
-      }
-      break;
-    }
-    case "card": {
-      console.log("Payment Method: Card");
-      console.log(`Last 4 Digits: ${payment.last4Digits}`);
-      break;
-    }
-    case "upi": {
-      console.log("Payment Method: UPI");
-      console.log(`Transaction ID: ${payment.transactionId}`);
-      break;
-    }
-    default:
-      return assertNever(payment);
-  }
-
-  const capitalizedStatus = status.charAt(0).toUpperCase() + status.slice(1);
-  console.log(`\nOrder Status: ${capitalizedStatus}`);
-  console.log("\n========================================");
-  console.log("        Thank you for ordering!         ");
-  console.log("========================================\n");
-}
-
-async function handleSelectOrCreateCustomer(
-  current: CustomerType | null,
-): Promise<CustomerType> {
-  console.log("\n--- Customer Selection ---");
-  const options = [
-    ...sampleCustomers.map((c) => {
-      const typeDesc =
-        c.type === "member"
-          ? `${c.membershipLevel.toUpperCase()} Member (${c.discountPercentage}% off)`
-          : "Guest (0% off)";
-      return {
-        name: `Select: ${c.name} [${typeDesc}]`,
-        value: `sample_${c.id}`,
-      };
-    }),
-    { name: "+ Create New Guest Customer", value: "new_guest" },
-    { name: "+ Create New Member Customer", value: "new_member" },
-  ];
-
-  if (current) {
-    options.unshift({
-      name: `Keep current: ${current.name} (${current.type})`,
-      value: "keep_current",
-    });
-  }
-
+async function selectCustomer(): Promise<CustomerType> {
   const choice = await select({
-    message: "Choose customer option:",
-    choices: options,
+    message: "Select Customer:",
+    choices: [
+      ...sampleCustomers.map((customer) => ({
+        name: customer.name,
+        value: customer.id.toString(),
+      })),
+
+      {
+        name: "Create New Guest",
+        value: "guest",
+      },
+
+      {
+        name: "Create New Member",
+        value: "member",
+      },
+    ],
   });
 
-  if (choice === "keep_current" && current) {
-    return current;
-  }
+  // Existing customer
+  if (choice !== "guest" && choice !== "member") {
+    const customer = sampleCustomers.find(
+      (c) => c.id === Number(choice)
+    );
 
-  if (choice.startsWith("sample_")) {
-    const id = Number(choice.replace("sample_", ""));
-    const selected = sampleCustomers.find((c) => c.id === id);
-    if (selected) {
-      console.log(`✓ Selected customer: ${selected.name}`);
-      return selected;
+    if (customer) {
+      console.log(`\n✓ Customer selected: ${customer.name}\n`);
+      return customer;
     }
   }
 
+  // New customer
   const name = await input({
-    message: "Enter customer name:",
-    validate: (val) => (val.trim().length > 0 ? true : "Name cannot be empty"),
+    message: "Customer Name:",
   });
-
-  const phoneInput = await input({
-    message: "Enter phone number (optional, press Enter to skip):",
-  });
-  const phone = phoneInput.trim().length > 0 ? phoneInput.trim() : undefined;
 
   const city = await input({
-    message: "Enter city:",
-    validate: (val) => (val.trim().length > 0 ? true : "City cannot be empty"),
+    message: "City:",
   });
 
   const street = await input({
-    message: "Enter street address:",
-    validate: (val) =>
-      val.trim().length > 0 ? true : "Street cannot be empty",
+    message: "Street:",
   });
 
   const pincode = await input({
-    message: "Enter pincode:",
-    validate: (val) =>
-      val.trim().length > 0 ? true : "Pincode cannot be empty",
+    message: "Pincode:",
+  });
+
+  const phone = await input({
+    message: "Phone (optional):",
   });
 
   const address: Address = {
-    city: city.trim(),
-    street: street.trim(),
-    pincode: pincode.trim(),
+    city,
+    street,
+    pincode,
   };
-  const newId = Math.floor(Math.random() * 9000) + 1000;
 
-  if (choice === "new_guest") {
-    const guest = createGuest(newId, name.trim(), address, phone);
-    console.log(`✓ Guest customer created: ${guest.name}`);
+  const id = Math.floor(Math.random() * 9000) + 1000;
+
+  // Guest
+  if (choice === "guest") {
+    const guest = createGuest(
+      id,
+      name,
+      address,
+      phone || undefined
+    );
+
+    console.log(`\n✓ Guest created: ${guest.name}\n`);
+
     return guest;
   }
 
-  const membershipLevel = (await select({
-    message: "Select membership level:",
+  // Member
+  const level = await select({
+    message: "Membership Level:",
     choices: [
-      { name: "Silver (5% discount)", value: "silver" },
-      { name: "Gold (10% discount)", value: "gold" },
-      { name: "Platinum (15% discount)", value: "platinum" },
+      {
+        name: "Silver - 5%",
+        value: "silver",
+      },
+      {
+        name: "Gold - 10%",
+        value: "gold",
+      },
+      {
+        name: "Platinum - 15%",
+        value: "platinum",
+      },
     ],
-  })) as MembershipLevel;
+  });
 
   const membershipId = await input({
-    message: "Enter membership ID:",
-    validate: (val) =>
-      val.trim().length > 0 ? true : "Membership ID cannot be empty",
+    message: "Membership ID:",
   });
 
   const member = createMember(
-    newId,
-    name.trim(),
+    id,
+    name,
     address,
-    membershipLevel,
-    membershipId.trim(),
-    phone,
+    level as MembershipLevel,
+    membershipId,
+    phone || undefined
   );
-  console.log(
-    `✓ ${membershipLevel.toUpperCase()} Member created: ${member.name}`,
-  );
+
+  console.log(`\n✓ Member created: ${member.name}\n`);
+
   return member;
 }
 
-async function handleAddToCart(cart: CartItem[]): Promise<CartItem[]> {
-  displayMenu(foodItems);
 
-  const idStr = await input({
-    message: "Enter Food Item ID to add:",
-    validate: (val) => {
-      const num = Number(val);
-      if (isNaN(num) || num <= 0) return "Please enter a valid numeric ID";
-      return true;
-    },
-  });
+// ---------------- ADD TO CART ----------------
 
-  const foodId = Number(idStr);
-  const food = foodItems.find((f) => f.id === foodId);
+async function addItem(cart: CartItem[]) {
+  showMenu(foodItems);
+
+  const id = Number(
+    await input({
+      message: "Enter Food ID:",
+    })
+  );
+
+  const food = foodItems.find((item) => item.id === id);
 
   if (!food) {
-    console.log("❌ Invalid Food Item ID! Item not found.");
+    console.log("\n❌ Food not found.\n");
     return cart;
   }
 
   if (!food.isAvailable) {
-    console.log(`❌ "${food.name}" is currently unavailable/sold out.`);
+    console.log("\n❌ Food is sold out.\n");
     return cart;
   }
 
-  const qtyStr = await input({
-    message: `Enter quantity for "${food.name}":`,
-    default: "1",
-    validate: (val) => {
-      const num = Number(val);
-      if (isNaN(num) || num <= 0) return "Quantity must be greater than 0";
-      return true;
-    },
+  const quantity = Number(
+    await input({
+      message: "Enter Quantity:",
+      default: "1",
+    })
+  );
+
+  const note = await input({
+    message: "Special Instruction (optional):",
   });
 
-  const quantity = Number(qtyStr);
-  const specialInstruction = await input({
-    message: "Special instruction (optional, press Enter to skip):",
-  });
+  cart = addToCart(
+    cart,
+    food,
+    quantity,
+    note || undefined
+  );
 
-  const note =
-    specialInstruction.trim().length > 0
-      ? specialInstruction.trim()
-      : undefined;
+  console.log(`\n✓ ${food.name} added to cart.\n`);
 
-  const updatedCart = addToCart(cart, food, quantity, note);
-  console.log(`✓ Added ${quantity}x "${food.name}" to cart.`);
-  return updatedCart;
+  return cart;
 }
 
-async function handleUpdateQuantity(cart: CartItem[]): Promise<CartItem[]> {
+
+// ---------------- UPDATE CART ----------------
+
+async function updateCart(cart: CartItem[]) {
   if (cart.length === 0) {
-    console.log("\n🛒 Cart is empty. Nothing to update.\n");
+    console.log("\n❌ Cart is empty.\n");
     return cart;
   }
 
-  const choices = cart.map((item) => ({
-    name: `${item.name} (Current Qty: ${item.quantity})`,
-    value: item.id.toString(),
-  }));
-
-  const selectedIdStr = await select({
-    message: "Select item to update quantity:",
-    choices,
+  const itemId = await select({
+    message: "Select item:",
+    choices: cart.map((item) => ({
+      name: `${item.name} (Qty: ${item.quantity})`,
+      value: item.id.toString(),
+    })),
   });
 
-  const foodId = Number(selectedIdStr);
-  const newQtyStr = await input({
-    message: "Enter new quantity (0 to remove):",
-    validate: (val) => {
-      const num = Number(val);
-      if (isNaN(num) || num < 0) return "Quantity cannot be negative";
-      return true;
-    },
-  });
+  const quantity = Number(
+    await input({
+      message: "New Quantity:",
+    })
+  );
 
-  const newQty = Number(newQtyStr);
-  const updatedCart = updateQuantity(cart, foodId, newQty);
-  if (newQty === 0) {
-    console.log("✓ Item removed from cart.");
-  } else {
-    console.log(`✓ Quantity updated to ${newQty}.`);
-  }
-  return updatedCart;
+  return updateQuantity(
+    cart,
+    Number(itemId),
+    quantity
+  );
 }
 
-async function handleRemoveFromCart(cart: CartItem[]): Promise<CartItem[]> {
+
+// ---------------- REMOVE ITEM ----------------
+
+async function removeItem(cart: CartItem[]) {
   if (cart.length === 0) {
-    console.log("\n🛒 Cart is empty. Nothing to remove.\n");
+    console.log("\n❌ Cart is empty.\n");
     return cart;
   }
 
-  const choices = cart.map((item) => ({
-    name: `${item.name} (Qty: ${item.quantity})`,
-    value: item.id.toString(),
-  }));
-
-  const selectedIdStr = await select({
-    message: "Select item to remove from cart:",
-    choices,
+  const itemId = await select({
+    message: "Select item to remove:",
+    choices: cart.map((item) => ({
+      name: item.name,
+      value: item.id.toString(),
+    })),
   });
 
-  const foodId = Number(selectedIdStr);
-  const updatedCart = removeFromCart(cart, foodId);
-  console.log("✓ Item removed from cart.");
-  return updatedCart;
+  return removeFromCart(
+    cart,
+    Number(itemId)
+  );
 }
 
-async function handleCheckout(
-  orderId: number,
+
+// ---------------- CHECKOUT ----------------
+
+async function checkout(
   cart: CartItem[],
   customer: CustomerType | null,
-  orderStatus: OrderStatus,
-): Promise<{
-  newCart: CartItem[];
-  newOrderId: number;
-  newOrderStatus: OrderStatus;
-}> {
+  orderId: number,
+  status: OrderStatus
+) {
   if (!customer) {
-    console.log(
-      "\n❌ No customer selected! Please create/select a customer before checkout.\n",
-    );
-    return { newCart: cart, newOrderId: orderId, newOrderStatus: orderStatus };
+    console.log("\n❌ Please select a customer first.\n");
+
+    return {
+      cart,
+      orderId,
+      status,
+    };
   }
 
   if (cart.length === 0) {
-    console.log("\n❌ Cart is empty! Add items to cart before checkout.\n");
-    return { newCart: cart, newOrderId: orderId, newOrderStatus: orderStatus };
+    console.log("\n❌ Cart is empty.\n");
+
+    return {
+      cart,
+      orderId,
+      status,
+    };
   }
 
+  // Calculate bill
   const subtotal = calculateSubtotal(cart);
-  const memDisc = calculateMembershipDiscount(subtotal, customer);
-  const addDisc = calculateAdditionalDiscount(subtotal);
-  const totalDisc = calculateDiscount(subtotal, customer);
-  const afterDiscount = subtotal - totalDisc;
+
+  const discount = calculateDiscount(
+    subtotal,
+    customer
+  );
+
+  const afterDiscount = subtotal - discount;
+
   const tax = calculateTax(afterDiscount);
-  const finalAmount = calculateFinalAmount(subtotal, totalDisc);
 
-  console.log("\n================ CHECKOUT SUMMARY ================");
-  console.log(`Customer:                        ${customer.name}`);
-  console.log(`Subtotal:                        ₹${subtotal}`);
-  console.log(`Membership Discount:             -₹${memDisc.toFixed(2)}`);
-  console.log(`Additional Discount (>₹2000):    -₹${addDisc.toFixed(2)}`);
-  console.log(`Amount After Discount:           ₹${afterDiscount.toFixed(2)}`);
-  console.log(`GST (5%):                        +₹${tax.toFixed(2)}`);
-  console.log("--------------------------------------------------");
-  console.log(`Final Amount Payable:            ₹${finalAmount.toFixed(2)}`);
-  console.log("==================================================\n");
+  const total = calculateFinalAmount(
+    subtotal,
+    discount
+  );
 
-  const shouldProceed = await confirm({
-    message: `Proceed to payment of ₹${finalAmount.toFixed(2)}?`,
+  console.log("\n============= CHECKOUT =============");
+  console.log(`Customer: ${customer.name}`);
+  console.log(`Subtotal: ₹${subtotal}`);
+  console.log(`Discount: ₹${discount.toFixed(2)}`);
+  console.log(`GST: ₹${tax.toFixed(2)}`);
+  console.log(`Total: ₹${total.toFixed(2)}`);
+  console.log("====================================\n");
+
+  const proceed = await confirm({
+    message: "Proceed to payment?",
     default: true,
   });
 
-  if (!shouldProceed) {
-    console.log("Payment cancelled.");
-    return { newCart: cart, newOrderId: orderId, newOrderStatus: orderStatus };
+  if (!proceed) {
+    console.log("\nPayment cancelled.\n");
+
+    return {
+      cart,
+      orderId,
+      status,
+    };
   }
 
-  const paymentMethod = await select({
-    message: "Select payment method:",
+
+  // Payment
+  const method = await select({
+    message: "Payment Method:",
     choices: [
-      { name: "1. Cash", value: "cash" },
-      { name: "2. Card", value: "card" },
-      { name: "3. UPI", value: "upi" },
+      {
+        name: "Cash",
+        value: "cash",
+      },
+      {
+        name: "Card",
+        value: "card",
+      },
+      {
+        name: "UPI",
+        value: "upi",
+      },
     ],
   });
 
+
   let payment: Payment;
 
-  if (paymentMethod === "cash") {
-    const receivedStr = await input({
-      message: `Enter cash received (minimum ₹${finalAmount.toFixed(2)}):`,
-      validate: (val) => {
-        const num = Number(val);
-        if (isNaN(num) || num <= 0) return "Enter a valid amount";
-        if (num < finalAmount)
-          return `Amount must be at least ₹${finalAmount.toFixed(2)}`;
-        return true;
-      },
+
+  // CASH
+  if (method === "cash") {
+    const amount = Number(
+      await input({
+        message: `Cash Received (₹${total}):`,
+      })
+    );
+
+    payment = {
+      method: "cash",
+      receivedAmount: amount,
+    };
+  }
+
+
+  // CARD
+  else if (method === "card") {
+    const last4 = await input({
+      message: "Last 4 Card Digits:",
     });
-    const receivedAmount = Number(receivedStr);
-    payment = { method: "cash", receivedAmount };
-  } else if (paymentMethod === "card") {
-    const last4Digits = await input({
-      message: "Enter card last 4 digits:",
-      validate: (val) => {
-        if (!/^\d{4}$/.test(val.trim()))
-          return "Must be exactly 4 numeric digits";
-        return true;
-      },
-    });
-    payment = { method: "card", last4Digits: last4Digits.trim() };
-  } else {
+
+    payment = {
+      method: "card",
+      last4Digits: last4,
+    };
+  }
+
+
+  // UPI
+  else {
     const transactionId = await input({
-      message: "Enter UPI Transaction ID:",
-      validate: (val) =>
-        val.trim().length > 0 ? true : "Transaction ID cannot be empty",
+      message: "UPI Transaction ID:",
     });
-    payment = { method: "upi", transactionId: transactionId.trim() };
+
+    payment = {
+      method: "upi",
+      transactionId,
+    };
   }
 
-  const paymentSuccess = processPayment(payment, finalAmount);
-  if (!paymentSuccess) {
-    console.log("\n❌ Payment verification failed. Order not placed.\n");
-    return { newCart: cart, newOrderId: orderId, newOrderStatus: orderStatus };
+
+  // Process payment
+  const success = processPayment(
+    payment,
+    total
+  );
+
+  if (!success) {
+    console.log("\n❌ Payment failed.\n");
+
+    return {
+      cart,
+      orderId,
+      status,
+    };
   }
 
-  const confirmedStatus = updateOrderStatus(orderStatus, "confirmed");
-  const billResult = generateBill(orderId, customer, cart, payment);
 
-  if (billResult.status === "error") {
-    console.log(`\n❌ Bill Generation Error: ${billResult.message}\n`);
-    return { newCart: cart, newOrderId: orderId, newOrderStatus: orderStatus };
+  // Update order
+  const newStatus = updateOrderStatus(
+    status,
+    "confirmed"
+  );
+
+
+  // Generate bill
+  const result = generateBill(
+    orderId,
+    customer,
+    cart,
+    payment
+  );
+
+
+  if (result.status === "error") {
+    console.log("\n❌ Bill generation failed.\n");
+
+    return {
+      cart,
+      orderId,
+      status,
+    };
   }
 
-  displayBill(billResult.bill, confirmedStatus);
+
+  console.log("✅ ORDER CONFIRMED");
+  console.log(`Order ID: #${orderId}`);
+  console.log(`Customer: ${customer.name}`);
+  console.log(`Amount: ₹${total.toFixed(2)}`);
+  console.log(`Payment: ${payment.method}`);
+  console.log(`Status: ${newStatus}`);
+
 
   return {
-    newCart: [],
-    newOrderId: orderId + 1,
-    newOrderStatus: confirmedStatus,
+    cart: [],
+    orderId: orderId + 1,
+    status: newStatus,
   };
 }
 
-async function handleChangeOrderStatus(
-  currentStatus: OrderStatus,
-): Promise<OrderStatus> {
-  console.log(`\nCurrent Order Status: "${currentStatus}"`);
 
-  const newStatus = (await select({
-    message: "Select new order status:",
+// ---------------- CHANGE STATUS ----------------
+
+async function changeStatus(
+  currentStatus: OrderStatus
+) {
+  const newStatus = await select({
+    message: "Select Order Status:",
     choices: ORDER_STATUSES.map((status) => ({
-      name: status.charAt(0).toUpperCase() + status.slice(1),
+      name: status,
       value: status,
     })),
-  })) as OrderStatus;
-
-  const updatedStatus = updateOrderStatus(currentStatus, newStatus);
-  console.log(`✓ Order status updated to: "${updatedStatus}".\n`);
-  return updatedStatus;
-}
-
-async function handleSearchFood(): Promise<void> {
-  const query = await input({
-    message: "Search food by name:",
-    validate: (val) =>
-      val.trim().length > 0 ? true : "Search term cannot be empty",
   });
 
-  const results = searchFood(foodItems, query);
-
-  console.log(`\nSearch results for "${query}":`);
-  console.log("----------------------------------------");
-  if (results.length === 0) {
-    console.log("No food items found matching your query.");
-  } else {
-    results.forEach((item, index) => {
-      const statusNote = item.isAvailable ? "" : " (Sold Out)";
-      console.log(`${index + 1}. ${item.name} - ₹${item.price}${statusNote}`);
-    });
-  }
-  console.log("----------------------------------------\n");
+  return updateOrderStatus(
+    currentStatus,
+    newStatus as OrderStatus
+  );
 }
 
-export async function main(): Promise<void> {
-  displayHeader();
+
+// ---------------- SEARCH ----------------
+
+async function search() {
+  const query = await input({
+    message: "Search Food:",
+  });
+
+  const results = searchFood(
+    foodItems,
+    query
+  );
+
+  console.log("\n------------- RESULTS -------------");
+
+  if (results.length === 0) {
+    console.log("No food found.");
+  } else {
+    results.forEach((item) => {
+      console.log(
+        `${item.id}. ${item.name} - ₹${item.price}`
+      );
+    });
+  }
+
+}
+
+
+// ================= MAIN =================
+
+export async function main() {
+
+  showHeader();
 
   let cart: CartItem[] = [];
-  let currentCustomer: CustomerType | null = null;
+
+  let customer: CustomerType | null = null;
+
   let orderId = 1001;
+
   let orderStatus: OrderStatus = "pending";
 
-  let isRunning = true;
 
-  while (isRunning) {
-    try {
-      const customerInfo = currentCustomer
-        ? `${currentCustomer.name} (${currentCustomer.type})`
-        : "None";
-      const cartCount = cart.reduce((count, item) => count + item.quantity, 0);
+  while (true) {
 
-      console.log(
-        `[Customer: ${customerInfo} | Cart Items: ${cartCount} | Order Status: ${orderStatus}]`,
-      );
+    console.log(
+      `Customer: ${customer?.name || "None"}`
+    );
 
-      const choice = await select({
-        message: "Main Menu:",
-        choices: [
-          { name: "1. View Food Menu", value: "1" },
-          { name: "2. Create / Select Customer", value: "2" },
-          { name: "3. Add Item to Cart", value: "3" },
-          { name: "4. View Cart", value: "4" },
-          { name: "5. Update Quantity", value: "5" },
-          { name: "6. Remove Item", value: "6" },
-          { name: "7. Checkout", value: "7" },
-          { name: "8. Change Order Status", value: "8" },
-          { name: "9. Search Food", value: "9" },
-          { name: "10. Exit", value: "10" },
-        ],
-      });
+    console.log(
+      `Cart Items: ${cart.length}`
+    );
 
-      switch (choice) {
-        case "1":
-          displayMenu(foodItems);
-          break;
+    console.log(
+      `Order Status: ${orderStatus}\n`
+    );
 
-        case "2":
-          currentCustomer = await handleSelectOrCreateCustomer(currentCustomer);
-          break;
 
-        case "3":
-          cart = await handleAddToCart(cart);
-          break;
+    const choice = await select({
 
-        case "4":
-          displayCart(cart, currentCustomer);
-          break;
+      message: "Main Menu:",
 
-        case "5":
-          cart = await handleUpdateQuantity(cart);
-          break;
+      choices: [
 
-        case "6":
-          cart = await handleRemoveFromCart(cart);
-          break;
+        {
+          name: "1. View Food Menu",
+          value: "menu",
+        },
 
-        case "7": {
-          const result = await handleCheckout(
-            orderId,
-            cart,
-            currentCustomer,
-            orderStatus,
-          );
-          cart = result.newCart;
-          orderId = result.newOrderId;
-          orderStatus = result.newOrderStatus;
-          break;
-        }
+        {
+          name: "2. Select Customer",
+          value: "customer",
+        },
 
-        case "8":
-          orderStatus = await handleChangeOrderStatus(orderStatus);
-          break;
+        {
+          name: "3. Add Item",
+          value: "add",
+        },
 
-        case "9":
-          await handleSearchFood();
-          break;
+        {
+          name: "4. View Cart",
+          value: "cart",
+        },
 
-        case "10":
-          console.log(
-            "\nThank you for using Food Ordering System. Goodbye! 👋\n",
-          );
-          isRunning = false;
-          break;
+        {
+          name: "5. Update Quantity",
+          value: "update",
+        },
 
-        default:
-          break;
+        {
+          name: "6. Remove Item",
+          value: "remove",
+        },
+
+        {
+          name: "7. Checkout",
+          value: "checkout",
+        },
+
+        {
+          name: "8. Change Order Status",
+          value: "status",
+        },
+
+        {
+          name: "9. Search Food",
+          value: "search",
+        },
+
+        {
+          name: "10. Exit",
+          value: "exit",
+        },
+
+      ],
+    });
+
+
+    switch (choice) {
+
+      case "menu":
+        showMenu(foodItems);
+        break;
+
+
+      case "customer":
+        customer = await selectCustomer();
+        break;
+
+
+      case "add":
+        cart = await addItem(cart);
+        break;
+
+
+      case "cart":
+        showCart(cart, customer);
+        break;
+
+
+      case "update":
+        cart = await updateCart(cart);
+        break;
+
+
+      case "remove":
+        cart = await removeItem(cart);
+        break;
+
+
+      case "checkout": {
+        const result = await checkout(
+          cart,
+          customer,
+          orderId,
+          orderStatus
+        );
+
+        cart = result.cart;
+        orderId = result.orderId;
+        orderStatus = result.status;
+
+        break;
       }
-    } catch (err: unknown) {
-      if (err instanceof Error && err.name === "ExitPromptError") {
-        console.log("\nOperation cancelled. Exiting application.\n");
-        isRunning = false;
-      } else {
-        console.error("\nUnexpected error occurred:", err);
-      }
+
+
+      case "status":
+        orderStatus = await changeStatus(
+          orderStatus
+        );
+        break;
+
+
+      case "search":
+        await search();
+        break;
+
+
+      case "exit":
+        console.log(
+          "\n👋 Thank you for using Food Ordering System!\n"
+        );
+        return;
     }
   }
 }
 
-if (process.env.NODE_ENV !== "test") {
-  main().catch((err) => {
-    console.error("Fatal error:", err);
-  });
-}
+
+// Start program
+main();
